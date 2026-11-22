@@ -1,0 +1,124 @@
+---
+title: "Introduction to cprc: Constrained Penalized Regression Combiners"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to cprc: Constrained Penalized Regression Combiners}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 6.5,
+  fig.height = 4
+)
+```
+
+## Overview
+
+The **cprc** package implements constrained penalized regression combiners on the unit probability simplex ($\sum_m w_m = 1, \; w_m \ge 0$) across three workflows:
+
+1. **Supervised streaming regression** (`cprc_reg()`) with generalized fused lasso (`"lasso"`), pairwise or identity ridge (`"ridge"`), constrained least squares (`"lse"`), and inverse-RMSE weighting (`"wavg"`).
+2. **Supervised streaming binary classification** (`cprc_class()`) minimizing penalized Bernoulli negative log-likelihood on the simplex.
+3. **Unsupervised multi-subject aggregation** (`cprc_unsupervised()`, `plot_elbow()`, `cprc_boot_test()`) for pooling heterogeneous high-dimensional parameter maps without a ground-truth target.
+
+```{r load-pkg}
+library(cprc)
+```
+
+## 1. Supervised Streaming Regression under Concept Drift
+
+We simulate a 10-batch regression stream with an abrupt regime shift at batch 6 using `make_seq_reg()`, fit ordinary least-squares base models on batches 1--8, train the combiners on batch 9, and evaluate test RMSE on batch 10.
+
+```{r reg-example}
+set.seed(123)
+stream_reg <- make_seq_reg(n = 150, M = 10, p = 8, change_points = c(6), sigma = 1)
+base_mods  <- lapply(stream_reg$seqdata[1:8], function(df) lm(y ~ ., data = df))
+
+b_tr  <- stream_reg$seqdata[[9]]
+b_te  <- stream_reg$seqdata[[10]]
+Fm_tr <- sapply(base_mods, function(m) predict(m, newdata = b_tr))
+Fm_te <- sapply(base_mods, function(m) predict(m, newdata = b_te))
+
+fit_lasso <- cprc_reg(y = b_tr$y, Fm = Fm_tr, penalty = "lasso", folds = 5)
+fit_ridge <- cprc_reg(y = b_tr$y, Fm = Fm_tr, penalty = "ridge", type = "pairwise", folds = 5)
+fit_wavg  <- cprc_reg(y = b_tr$y, Fm = Fm_tr, penalty = "wavg")
+
+print(fit_lasso)
+
+c(
+  Lasso = sqrt(mean((b_te$y - predict(fit_lasso, newdata = Fm_te))^2)),
+  Ridge = sqrt(mean((b_te$y - predict(fit_ridge, newdata = Fm_te))^2)),
+  WAvg  = sqrt(mean((b_te$y - predict(fit_wavg,  newdata = Fm_te))^2))
+)
+```
+
+We can also visualize the estimated weight profile relative to the uniform baseline $1/M$ and inspect the recovered clusters and drift angle $\eta(\mathbf{w}^*, \hat{\mathbf{w}})$:
+
+```{r reg-plot}
+plot(fit_lasso)
+extract_clusters(fit_lasso)
+```
+
+## 2. Supervised Streaming Classification
+
+For binary outcomes under concept drift, `cprc_class()` combines base classifier log-odds predictions via penalized logistic regression on the unit simplex.
+
+```{r class-example}
+set.seed(42)
+stream_clf <- make_seq_plane(n1 = 150, n2 = 300, blocks = 10,
+                             flippoint = c(6), dimen = 8,
+                             delta = c(0.02, 2.0), flipprob = 0.05)
+
+clf_mods <- lapply(stream_clf$train_batches[1:8], function(df) {
+  suppressWarnings(glm(y ~ ., data = df, family = binomial()))
+})
+
+clf_tr <- stream_clf$train_batches[[9]]
+clf_te <- stream_clf$test_batches[[10]]
+Fm_clf_tr <- sapply(clf_mods, function(m) predict(m, newdata = clf_tr, type = "link"))
+Fm_clf_te <- sapply(clf_mods, function(m) predict(m, newdata = clf_te, type = "link"))
+
+fit_clf <- cprc_class(y = clf_tr$y, Fm = Fm_clf_tr, penalty = "lasso", folds = 5)
+print(fit_clf)
+
+pred_cprc  <- predict(fit_clf, newdata = Fm_clf_te, type = "class")
+pred_equal <- ifelse(rowMeans(Fm_clf_te) >= 0, 1, 0)
+
+c(CPRC_Lasso_Error = mean(pred_cprc != clf_te$y),
+  Equal_Error      = mean(pred_equal != clf_te$y))
+```
+
+## 3. Unsupervised Aggregation of Statistical Parametric Maps
+
+When no ground-truth target map is available, `cprc_unsupervised()` estimates subject weights via norm-constrained alternating optimal scoring initialized at the voxel-wise median, and `cprc_boot_test()` performs voxel-wise weighted $t$-tests with parametric bootstrap $p$-values.
+
+```{r spm-example, fig.height = 3.8}
+spm_path  <- system.file("extdata", "synth_spm.csv", package = "cprc")
+synth_spm <- as.matrix(read.csv(spm_path))
+
+fit_un <- cprc_unsupervised(synth_spm, lambda = 20)
+print(fit_un)
+
+old_par <- par(mfrow = c(1, 2))
+plot(fit_un, type = "elbow")
+plot(fit_un, type = "weights")
+par(old_par)
+
+set.seed(123)
+boot_res <- cprc_boot_test(synth_spm, w = fit_un, B = 100,
+                           alpha = 0.05, adjust_method = "holm")
+p_unw <- apply(synth_spm, 1, function(v) stats::t.test(v)$p.value)
+act_unw <- stats::p.adjust(p_unw, method = "holm") < 0.05
+
+c(Unweighted_Holm = sum(act_unw),
+  CPRC_Holm       = sum(boot_res$active_voxels))
+```
+
+## References
+
+- Wang, L.-Y., Park, C., Choi, H., and Yeon, K. (2016). A classifier ensemble for concept drift using a constrained penalized regression combiner. *Procedia Computer Science*, 91, 252--259.
+- Wang, L.-Y., Park, C., Yeon, K., and Choi, H. (2017). Tracking concept drift using a constrained penalized regression combiner. *Computational Statistics & Data Analysis*, 108, 52--69.
+- Wang, L.-Y., Chung, J., Park, C., Choi, H., Rodrigue, A. L., Pierce, J. E., Clementz, B. A., and McDowell, J. E. (2018). Regularized aggregation of statistical parametric maps. *Human Brain Mapping*, 39(12), 4811--4825.

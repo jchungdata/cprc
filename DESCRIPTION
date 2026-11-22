@@ -1,0 +1,35 @@
+Package: cprc
+Title: Constrained Penalized Regression Combiners for Streaming Ensembles and Unsupervised Aggregation
+Version: 0.1.0
+Date: 2026-11-22
+Authors@R: c(
+    person("Jongik", "Chung", email = "Jongik.Chung@ucf.edu", role = c("aut", "cre")),
+    person("Young Joo", "Yoon", role = "aut"),
+    person("Cheolwoo", "Park", email = "parkcw2021@kaist.ac.kr", role = "aut")
+  )
+Description: Implements constrained penalized regression combiners (CPRC) on the
+    unit probability simplex for adaptive model aggregation in non-stationary
+    streaming environments and heterogeneous multi-subject studies. Supports
+    generalized fused lasso and pairwise ridge penalties for supervised streaming
+    regression and binary classification via an Alternating Direction Method of
+    Multipliers (ADMM) and proximal gradient framework, along with angular concept
+    drift diagnostics and homogeneous batch clustering. Also provides constrained
+    ridge optimal scoring for unsupervised aggregation of high-dimensional
+    statistical parametric maps, cumulative weight elbow diagnostics, and
+    parametric bootstrap-based weighted t-tests with multiple-testing corrections.
+License: GPL (>= 3)
+URL: https://github.com/jchungdata/cprc
+BugReports: https://github.com/jchungdata/cprc/issues
+Encoding: UTF-8
+LazyData: false
+VignetteBuilder: knitr
+Imports:
+    quadprog,
+    stats,
+    graphics,
+    utils
+Suggests:
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/roxygen2/version: 8.1.1
